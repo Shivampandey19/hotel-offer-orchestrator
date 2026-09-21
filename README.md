@@ -1,6 +1,6 @@
 # Hotel Offer Orchestrator
 
-A complete implementation of the **Backend + Redis** assessment.
+A complete implementation of the Backend + Redis assessment.
 
 ## Stack
 
@@ -12,37 +12,95 @@ A complete implementation of the **Backend + Redis** assessment.
 - Docker / Docker Compose
 - Postman
 - GitHub Actions CI
+- Railway-ready deployment configuration
 
-## What the system does
+## Railway deployment
 
-GET /api/hotels?city=delhi
+Railway maps each Compose service to a separate Railway service.
 
-1. Starts a Temporal workflow.
-2. Temporal runs Supplier A and Supplier B activities in parallel.
-3. Each supplier returns mock hotel data.
-4. The workflow deduplicates hotels by name.
-5. If a hotel exists in both suppliers, the cheaper price wins.
-6. Hotels present in only one supplier are retained.
-7. The final list is persisted in Redis.
-8. The API reads the result from Redis.
-9. Optional minPrice / maxPrice filtering is performed directly by Redis using a sorted set.
+### API service
+
+Connect GitHub repository:
+
+Shivampandey19/hotel-offer-orchestrator
+
+Use the root Dockerfile.
+
+Start command:
+
+node dist/server.js
+
+Generate a public domain for the API.
+
+### Worker service
+
+Create a second Railway service from the same GitHub repository.
+
+Set the Dockerfile path to:
+
+Dockerfile.worker
+
+The worker command is already defined as:
+
+node dist/worker.js
+
+Do not generate a public domain for the worker.
+
+### Redis
+
+Add Railway managed Redis.
+
+Set REDIS_URL for both API and worker from the Redis service.
+
+### Temporal
+
+Add a Temporal server service suitable for the assessment environment.
+
+Set:
+
+TEMPORAL_ADDRESS=<temporal-service-private-host>:7233
+TEMPORAL_NAMESPACE=default
+TEMPORAL_TASK_QUEUE=hotel-offers
+
+### Service variables
+
+API:
+
+PORT=3000
+REDIS_URL=<Railway Redis URL>
+TEMPORAL_ADDRESS=<Temporal private host>:7233
+TEMPORAL_NAMESPACE=default
+TEMPORAL_TASK_QUEUE=hotel-offers
+SUPPLIER_BASE_URL=http://<api-service-private-host>:3000
+
+Worker:
+
+REDIS_URL=<Railway Redis URL>
+TEMPORAL_ADDRESS=<Temporal private host>:7233
+TEMPORAL_NAMESPACE=default
+TEMPORAL_TASK_QUEUE=hotel-offers
+SUPPLIER_BASE_URL=http://<api-service-private-host>:3000
+
+Use Railway private networking for service-to-service communication.
 
 ## API
 
 GET /api/hotels?city=delhi
-
 GET /api/hotels?city=delhi&minPrice=4000&maxPrice=6000
-
 GET /supplierA/hotels?city=delhi
 GET /supplierB/hotels?city=delhi
-
 GET /health
 
-The health endpoint checks Redis, Temporal, Supplier A and Supplier B.
+## What the system does
+
+1. Starts a Temporal workflow.
+2. Calls Supplier A and Supplier B in parallel.
+3. Deduplicates hotels by name.
+4. Selects the lower price for overlaps.
+5. Persists final offers to Redis.
+6. Filters by price using Redis sorted sets.
 
 ## Expected Delhi result
-
-The mock data intentionally contains overlaps:
 
 - Holtin: A = 6000, B = 5340 -> B selected
 - Radison: A = 5900, B = 6100 -> A selected
@@ -50,99 +108,31 @@ The mock data intentionally contains overlaps:
 - Taj Palace: only A -> retained
 - The Oberoi: only B -> retained
 
-The API returns the selected offers ordered by price.
-
-## Redis design
-
-Two structures are used per city:
-
-hotels:price:<city>
-
-Redis Sorted Set where the score is the hotel price.
-
-hotel:<city>:<hotel-name>
-
-Redis String containing the final response JSON.
-
-Price filtering is executed in Redis with ZRANGEBYSCORE, avoiding fetching the complete list into Node.js just to filter it.
-
-## Temporal design
-
-The workflow is deterministic and delegates external I/O to activities:
-
-hotelOfferWorkflow
-  -> fetchSupplierA()
-  -> fetchSupplierB()
-  -> deduplicateOffers
-  -> persistOffers
-  -> Redis
-
-Supplier activities have retry configuration for transient failures.
-
-## Run with Docker
-
-Prerequisites: Docker Desktop / Docker Engine.
-
-docker compose up --build
-
-Services:
-
-| Service | Address |
-|---|---|
-| API | http://localhost:3000 |
-| Redis | localhost:6379 |
-| Temporal gRPC | localhost:7233 |
-| Temporal UI | http://localhost:8233 |
-
-## Test
-
-curl "http://localhost:3000/api/hotels?city=delhi"
-curl "http://localhost:3000/api/hotels?city=delhi&minPrice=4000&maxPrice=6000"
-curl "http://localhost:3000/api/hotels?city=mumbai"
-curl "http://localhost:3000/health"
-
 ## Local development
-
-Run Redis and Temporal locally, then:
 
 npm install
 npm run build
 npm test
 npm run dev
 
-Environment variables are documented in .env.example.
+## Docker
 
-## Postman
-
-Import postman/Hotel-Offer-Orchestrator.postman_collection.json.
-
-The collection covers valid Delhi request with overlapping hotels, price filtering, city with no results, Supplier A, Supplier B, and health check.
-
-## Supplier-down scenario
-
-The assessment marks supplier-down simulation as optional. The architecture isolates supplier calls into Temporal activities with retries and error logging. For a production extension, a mock failure flag can be added to the supplier routes without changing the workflow contract.
-
-## Production considerations
-
-For production, consider Redis connection retry/backoff and circuit breaker, Temporal task queue monitoring, correlation IDs, Prometheus metrics, distributed tracing, authentication/rate limiting, persistent Temporal database, supplier timeout/fallback policy, schema validation with Zod, contract/integration tests, and Kubernetes deployment.
+docker compose up --build
 
 ## Submission checklist
 
-- [x] Source code
 - [x] TypeScript
 - [x] Express
 - [x] Temporal workflow
 - [x] Parallel supplier calls
-- [x] Overlap comparison
 - [x] Deduplication
-- [x] Redis persistence
-- [x] Redis price filtering
-- [x] Dockerfile
-- [x] Docker Compose
-- [x] README
+- [x] Redis persistence and filtering
+- [x] Docker / Docker Compose
+- [x] Railway API Dockerfile
+- [x] Railway worker Dockerfile
+- [x] Railway deployment configuration
 - [x] Postman collection
-- [x] Health check bonus
-- [x] Logging
-- [x] Activity retries
+- [x] Health check
+- [x] Logging and retries
 - [x] Unit tests
 - [x] GitHub Actions CI
