@@ -117,14 +117,47 @@ loadHealth();searchHotels();
 </script>
 </body></html>`);
 });
-app.get("/health", (_req, res) => {
-  // Keep the Railway liveness probe fast and independent of downstream services.
-  // Dependency checks are intentionally handled by application requests.
+app.get("/health", async (_req, res) => {
+  const check = async (fn: () => Promise<unknown>, timeoutMs = 1200): Promise<boolean> => {
+    try {
+      await Promise.race([
+        fn(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs))
+      ]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const [redisUp, temporalUp, supplierAUp, supplierBUp] = await Promise.all([
+    check(() => redis.ping()),
+    check(async () => {
+      const client = await getTemporalClient();
+      await client.workflowService.getSystemInfo({});
+    }),
+    check(async () => {
+      const response = await fetch(`${config.supplierBaseUrl}/supplierA/hotels?city=delhi`);
+      if (!response.ok) throw new Error("supplier A unavailable");
+    }),
+    check(async () => {
+      const response = await fetch(`${config.supplierBaseUrl}/supplierB/hotels?city=delhi`);
+      if (!response.ok) throw new Error("supplier B unavailable");
+    })
+  ]);
+
+  const status = redisUp && temporalUp && supplierAUp && supplierBUp ? "ok" : "degraded";
   return res.status(200).json({
-    status: "ok",
-    service: "hotel-offer-orchestrator"
+    status,
+    redis: redisUp ? "up" : "down",
+    temporal: temporalUp ? "up" : "down",
+    suppliers: {
+      supplierA: supplierAUp ? "up" : "down",
+      supplierB: supplierBUp ? "up" : "down"
+    }
   });
 });
+
 app.get("/supplierA/hotels", (req, res) => {
   const city = String(req.query.city ?? "").trim();
   if (!city) return res.status(400).json({ error: "city is required" });
