@@ -34,42 +34,14 @@ app.get("/", (_req, res) => {
 </ul><p>Backend assessment deployment.</p></body></html>`);
 });
 
-app.get("/health", async (_req, res) => {
-  const result = {
+app.get("/health", (_req, res) => {
+  // Keep the Railway liveness probe fast and independent of downstream services.
+  // Dependency checks are intentionally handled by application requests.
+  return res.status(200).json({
     status: "ok",
-    redis: "down",
-    temporal: "down",
-    suppliers: { supplierA: "down", supplierB: "down" }
-  };
-
-  try { await redis.ping(); result.redis = "up"; }
-  catch (error) { logger.warn({ error }, "Redis health check failed"); }
-
-  try {
-    const client = await getTemporalClient();
-    await client.workflowService.getSystemInfo({});
-    result.temporal = "up";
-  } catch (error) { logger.warn({ error }, "Temporal health check failed"); }
-
-  const supplierChecks = [
-    ["supplierA", "/supplierA/hotels"],
-    ["supplierB", "/supplierB/hotels"]
-  ] as const;
-
-  for (const [name, path] of supplierChecks) {
-    try {
-      const response = await fetch(`${config.supplierBaseUrl}${path}?city=delhi`);
-      result.suppliers[name] = response.ok ? "up" : "down";
-    } catch (error) {
-      logger.warn({ error, supplier: name }, "Supplier health check failed");
-    }
-  }
-
-  const values = [result.redis, result.temporal, result.suppliers.supplierA, result.suppliers.supplierB];
-  if (values.includes("down")) result.status = "degraded";
-  return res.json(result);
+    service: "hotel-offer-orchestrator"
+  });
 });
-
 app.get("/supplierA/hotels", (req, res) => {
   const city = String(req.query.city ?? "").trim();
   if (!city) return res.status(400).json({ error: "city is required" });
