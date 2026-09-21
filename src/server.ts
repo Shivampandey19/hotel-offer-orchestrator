@@ -1,0 +1,131 @@
+import express, { Request, Response } from "express";
+import { Client, Connection } from "@temporalio/client";
+import pinoHttp from "pino-http";
+import { config } from "./config";
+import { logger } from "./logger";
+import { getOffersByPrice, redis } from "./redis";
+import { getSupplierHotels } from "./suppliers";
+import { hotelOfferWorkflow } from "./workflows";
+
+const app = express();
+app.use(express.json());
+app.use(pinoHttp({ logger }));
+
+let temporalClient: Client | undefined;
+
+async function getTemporalClient(): Promise<Client> {
+  if (temporalClient) return temporalClient;
+  const connection = await Connection.connect({ address: config.temporalAddress });
+  temporalClient = new Client({ connection, namespace: config.temporalNamespace });
+  return temporalClient;
+}
+
+app.get("/health", async (_req, res) => {
+  const result = {
+    status: "ok",
+    redis: "down",
+    temporal: "down",
+    suppliers: { supplierA: "down", supplierB: "down" }
+  };
+
+  try { await redis.ping(); result.redis = "up"; }
+  catch (error) { logger.warn({ error }, "Redis health check failed"); }
+
+  try {
+    const client = await getTemporalClient();
+    await client.workflowService.getSystemInfo({});
+    result.temporal = "up";
+  } catch (error) { logger.warn({ error }, "Temporal health check failed"); }
+
+  const supplierChecks = [
+    ["supplierA", "/supplierA/hotels"],
+    ["supplierB", "/supplierB/hotels"]
+  ] as const;
+
+  for (const [name, path] of supplierChecks) {
+    try {
+      const response = await fetch(`${config.supplierBaseUrl}${path}?city=delhi`);
+      result.suppliers[name] = response.ok ? "up" : "down";
+    } catch (error) {
+      logger.warn({ error, supplier: name }, "Supplier health check failed");
+    }
+  }
+
+  const values = [result.redis, result.temporal, result.suppliers.supplierA, result.suppliers.supplierB];
+  if (values.includes("down")) {
+    result.status = "degraded";
+    return res.status(503).json(result);
+  }
+  return res.json(result);
+});
+
+app.get("/supplierA/hotels", (req, res) => {
+  const city = String(req.query.city ?? "").trim();
+  if (!city) return res.status(400).json({ error: "city is required" });
+  return res.json(getSupplierHotels("Supplier A", city));
+});
+
+app.get("/supplierB/hotels", (req, res) => {
+  const city = String(req.query.city ?? "").trim();
+  if (!city) return res.status(400).json({ error: "city is required" });
+  return res.json(getSupplierHotels("Supplier B", city));
+});
+
+app.get("/api/hotels", async (req: Request, res: Response) => {
+  const city = String(req.query.city ?? "").trim().toLowerCase();
+  if (!city) return res.status(400).json({ error: "city query parameter is required" });
+
+  const minRaw = req.query.minPrice;
+  const maxRaw = req.query.maxPrice;
+  const minPrice = minRaw === undefined ? undefined : Number(minRaw);
+  const maxPrice = maxRaw === undefined ? undefined : Number(maxRaw);
+
+  if (
+    (minPrice !== undefined && !Number.isFinite(minPrice)) ||
+    (maxPrice !== undefined && !Number.isFinite(maxPrice))
+  ) {
+    return res.status(400).json({ error: "minPrice and maxPrice must be valid numbers" });
+  }
+
+  if (minPrice !== undefined && maxPrice !== undefined && minPrice > maxPrice) {
+    return res.status(400).json({ error: "minPrice cannot be greater than maxPrice" });
+  }
+
+  try {
+    const client = await getTemporalClient();
+    const handle = await client.workflow.start(hotelOfferWorkflow, {
+      taskQueue: config.temporalTaskQueue,
+      workflowId: `hotel-offers-${city}-${Date.now()}`,
+      args: [city]
+    });
+
+    await handle.result();
+
+    const offers = await getOffersByPrice(
+      city,
+      minPrice ?? 0,
+      maxPrice ?? Number.POSITIVE_INFINITY
+    );
+
+    return res.json(offers);
+  } catch (error) {
+    req.log.error({ error, city }, "Hotel aggregation failed");
+    return res.status(502).json({
+      error: "Unable to aggregate hotel offers",
+      message: error instanceof Error ? error.message : "Unknown error"
+    });
+  }
+});
+
+const server = app.listen(config.port, () => {
+  logger.info({ port: config.port }, "HTTP server started");
+});
+
+async function shutdown(): Promise<void> {
+  server.close();
+  await redis.quit();
+  process.exit(0);
+}
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
