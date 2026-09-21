@@ -20,6 +20,20 @@ async function getTemporalClient(): Promise<Client> {
   return temporalClient;
 }
 
+app.get("/", (_req, res) => {
+  res.type("html").send(`<!doctype html>
+<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hotel Offer Orchestrator</title>
+<style>body{font-family:system-ui,sans-serif;max-width:760px;margin:60px auto;padding:24px;line-height:1.6}code{background:#f2f2f2;padding:3px 6px;border-radius:5px}</style>
+</head><body><h1>Hotel Offer Orchestrator</h1>
+<p>Temporal-powered hotel offer aggregation API.</p>
+<h2>Endpoints</h2><ul>
+<li><code>GET /health</code> — service health</li>
+<li><code>GET /api/hotels?city=delhi</code> — aggregated offers</li>
+<li><code>GET /api/hotels?city=delhi&minPrice=4000&maxPrice=6000</code> — filtered offers</li>
+</ul><p>Backend assessment deployment.</p></body></html>`);
+});
+
 app.get("/health", async (_req, res) => {
   const result = {
     status: "ok",
@@ -52,10 +66,7 @@ app.get("/health", async (_req, res) => {
   }
 
   const values = [result.redis, result.temporal, result.suppliers.supplierA, result.suppliers.supplierB];
-  if (values.includes("down")) {
-    result.status = "degraded";
-    return res.status(503).json(result);
-  }
+  if (values.includes("down")) result.status = "degraded";
   return res.json(result);
 });
 
