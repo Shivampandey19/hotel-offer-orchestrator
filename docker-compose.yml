@@ -1,0 +1,47 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: hotel-redis
+    ports:
+      - "6379:6379"
+
+  temporal:
+    image: temporalio/auto-setup:1.27.2
+    container_name: hotel-temporal
+    environment:
+      DB: sqlite
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+
+  api:
+    build: .
+    container_name: hotel-api
+    environment:
+      PORT: 3000
+      REDIS_URL: redis://redis:6379
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: hotel-offers
+      SUPPLIER_BASE_URL: http://api:3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - redis
+      - temporal
+
+  worker:
+    build: .
+    container_name: hotel-worker
+    command: ["node", "dist/worker.js"]
+    environment:
+      REDIS_URL: redis://redis:6379
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: hotel-offers
+      SUPPLIER_BASE_URL: http://api:3000
+    depends_on:
+      - redis
+      - temporal
+      - api
