@@ -36,7 +36,8 @@ h1{font-size:clamp(32px,6vw,58px);line-height:1.02;margin:16px 0 12px}.hero p{ma
 .stack{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}.stack span{background:#fff;color:#172033;padding:7px 11px;border-radius:9px;font-size:13px;font-weight:600}
 .panel{background:#fff;border:1px solid #e5e9f2;border-radius:18px;padding:22px;margin-top:20px;box-shadow:0 8px 28px rgba(23,32,51,.06)}
 .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.stat{padding:16px;background:#f8f9fc;border-radius:14px}.stat b{display:block;font-size:22px;margin-top:4px}.muted{color:#68738a;font-size:13px}
-.controls{display:grid;grid-template-columns:1.5fr 1fr 1fr auto;gap:10px;margin-top:16px}input,select,button{width:100%;padding:12px 13px;border-radius:10px;border:1px solid #d7ddea;font:inherit}button{background:#3157d5;color:#fff;border:0;font-weight:700;cursor:pointer}button.secondary{background:#eef2ff;color:#3157d5}.results{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:18px}.card{border:1px solid #e5e9f2;border-radius:15px;padding:17px;background:#fff}.price{font-size:25px;font-weight:800}.supplier{display:inline-block;margin-top:9px;padding:5px 8px;border-radius:7px;background:#eef2ff;color:#3157d5;font-size:12px;font-weight:700}
+.controls{display:grid;grid-template-columns:1.5fr 1fr 1fr auto;gap:10px;margin-top:16px}input,button{width:100%;padding:12px 13px;border-radius:10px;border:1px solid #d7ddea;font:inherit}button{background:#3157d5;color:#fff;border:0;font-weight:700;cursor:pointer}
+.results{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:18px}.card{border:1px solid #e5e9f2;border-radius:15px;padding:17px;background:#fff}.price{font-size:25px;font-weight:800}.supplier{display:inline-block;margin-top:9px;padding:5px 8px;border-radius:7px;background:#eef2ff;color:#3157d5;font-size:12px;font-weight:700}
 .health{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.health div{padding:13px;border-radius:11px;background:#f8f9fc}.up{color:#14804a;font-weight:700}.down{color:#c0392b;font-weight:700}
 .endpoint{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#f3f5f9;padding:4px 7px;border-radius:6px}
 footer{margin-top:24px;color:#68738a;font-size:13px;text-align:center}
@@ -79,7 +80,7 @@ footer{margin-top:24px;color:#68738a;font-size:13px;text-align:center}
 <div class="stat"><span class="muted">Delivery</span><b>Docker</b><span class="muted">Railway deployment</span></div>
 </div>
 <p><span class="endpoint">GET /api/hotels?city=delhi</span></p>
-<p><span class="endpoint">GET /api/hotels?city=delhi&minPrice=4000&maxPrice=6000</span></p>
+<p><span class="endpoint">GET /api/hotels?city=delhi&amp;minPrice=4000&amp;maxPrice=6000</span></p>
 <p><span class="endpoint">GET /supplierA/hotels?city=delhi</span></p>
 <p><span class="endpoint">GET /supplierB/hotels?city=delhi</span></p>
 <p><span class="endpoint">GET /health</span></p>
@@ -88,29 +89,32 @@ footer{margin-top:24px;color:#68738a;font-size:13px;text-align:center}
 <footer>Hotel Offer Orchestrator • Temporal-powered hotel offer aggregation API</footer>
 </main>
 <script>
-const money=n=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:0}).format(n);
+function money(n){return new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:0}).format(n)}
 async function searchHotels(){
- const city=document.getElementById("city").value.trim();
- const min=document.getElementById("min").value;
- const max=document.getElementById("max").value;
- const msg=document.getElementById("message"), out=document.getElementById("results");
+ var city=document.getElementById("city").value.trim();
+ var min=document.getElementById("min").value;
+ var max=document.getElementById("max").value;
+ var msg=document.getElementById("message"),out=document.getElementById("results");
  if(!city){msg.textContent="Please enter a city.";return}
  msg.textContent="Running Temporal workflow and fetching offers...";
  out.innerHTML="";
- const q=new URLSearchParams({city});
+ var q=new URLSearchParams({city:city});
  if(min)q.set("minPrice",min);if(max)q.set("maxPrice",max);
  try{
-  const r=await fetch("/api/hotels?"+q.toString());const data=await r.json();
+  var r=await fetch("/api/hotels?"+q.toString());var data=await r.json();
   if(!r.ok)throw new Error(data.message||data.error||"Request failed");
   msg.textContent=data.length+" offer(s) returned";
-  out.innerHTML=data.length?data.map(x=>`<article class="card"><div class="muted">Hotel</div><h3>${x.name}</h3><div class="price">${money(x.price)}</div><span class="supplier">${x.supplier}</span><div class="muted" style="margin-top:10px">Commission: ${x.commissionPct}%</div></article>`).join(""):"<div class='muted'>No hotels found for this city/price range.</div>";
+  if(!data.length){out.innerHTML="<div class='muted'>No hotels found for this city/price range.</div>";return}
+  out.innerHTML=data.map(function(x){return "<article class='card'><div class='muted'>Hotel</div><h3>"+x.name+"</h3><div class='price'>"+money(x.price)+"</div><span class='supplier'>"+x.supplier+"</span><div class='muted' style='margin-top:10px'>Commission: "+x.commissionPct+"%</div></article>"}).join("");
  }catch(e){msg.textContent="Error: "+e.message}
 }
 async function loadHealth(){
- const el=document.getElementById("health");
+ var el=document.getElementById("health");
  try{
-  const r=await fetch("/health");const h=await r.json();
-  el.innerHTML=[["Overall",h.status],["Redis",h.redis],["Supplier A",h.suppliers?.supplierA],["Supplier B",h.suppliers?.supplierB]].map(([n,v])=>`<div><span class="muted">${n}</span><br><span class="${v==="up"||v==="ok"?"up":"down"}">${v||"unknown"}</span></div>`).join("");
+  var r=await fetch("/health");var h=await r.json();
+  var items=[["Overall",h.status],["Redis",h.redis],["Temporal",h.temporal],["Supplier A",h.suppliers&&h.suppliers.supplierA],["Supplier B",h.suppliers&&h.suppliers.supplierB]];
+  el.style.gridTemplateColumns="repeat(auto-fit,minmax(150px,1fr))";
+  el.innerHTML=items.map(function(item){var v=item[1]||"unknown";return "<div><span class='muted'>"+item[0]+"</span><br><span class='"+(v==="up"||v==="ok"?"up":"down")+"'>"+v+"</span></div>"}).join("");
  }catch(e){el.innerHTML="<div class='down'>Health check unavailable</div>"}
 }
 loadHealth();searchHotels();
